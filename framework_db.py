@@ -5,6 +5,7 @@ import sqlite3
 NOERROR = 0
 ERROR_TABLE_NOT_EXISTS = 20
 ERROR_TABLE_DIFF = 21
+ERROR_SQL_QUERY = 22
 
 class Database(object):
 
@@ -30,8 +31,8 @@ class Database(object):
             self.row = len(self.items)
             self.column = len(db_table_struct)
 
-            sub_sql_query = ", ".join([ " ".join(x) for x in MainDb._table_struct["items"]])
-            sql_query_pk = "PRIMARY KEY ( %s )" % ", ".join(MainDb._table_struct["pk"])
+            sub_sql_query = ", ".join([ " ".join(x) for x in db_table_struct["items"]])
+            sql_query_pk = "PRIMARY KEY ( %s )" % ", ".join(db_table_struct["pk"])
 
             self.sql_query_create = "CREATE TABLE %s ( %s, %s );" % ( self.db_table_name, sub_sql_query, sql_query_pk)
 
@@ -76,44 +77,11 @@ class Database(object):
 
 
     def execute(self, sql_query, values=(), commit=False):
-
-        rc = 0; rm = ""; data = ()
-        db_connection = None
-
-        if os.path.exists(self.db_path):
-            try:
-
-                db_connection = sqlite3.connect(self.db_path)
-                db_connection.text_factory = str
-                db_cursor = db_connection.cursor()
-                db_cursor.execute(sql_query, values)
-
-                if commit == True:
-                    db_connection.commit()
-                else:
-                    data = db_cursor.fetchall()
-
-                if len(data) == 0:
-                    data = ()
-
-            except sqlite3.Error as e:
-
-                err_msg = str(e)
-                rc, rm = self.parse_error(err_msg)
-
-            finally:
-                if db_connection:
-                    db_connection.close()
-
-        else:
-            rm =  "Database %s does not exist." % self.db_path
-            rc = ERROR_TABLE_NOT_EXISTS
-
-        return rc, rm, data
-
+        return 0, "", ()
 
     def add_record(self, key_values):
 
+        rc = NOERROR; rm = ""
         sql_query_insert = "Insert INTO %s VALUES (" % self.db_table_name
         sql_sub_query = ""
 
@@ -128,10 +96,14 @@ class Database(object):
 
             self.execute(sql_query_insert, key_values, True)
         else:
-            print "Not enough values"
+            rm = "Not enough values to add record in database"
+            rc = ERROR_SQL_QUERY
+
+        return rc, rm
 
     def delete_record(self, values):
 
+        rc = NOERROR; rm = ""
         sql_query_delete = "DELETE FROM %s WHERE " % self.db_table_name
 
         if len(values) == len(self.keys):
@@ -146,13 +118,18 @@ class Database(object):
             self.execute(sql_query_delete, values, commit=True)
 
         else:
-            print "Type more details."
+            rm = "Not enough values to delete record in database"
+            rc = ERROR_SQL_QUERY
+
+        return rc, rm
+
 
     def read_all(self):
 
         sql_query_select = "SELECT * FROM %s;" % self.db_table_name
         rc, rm, data = self.execute(sql_query_select, commit=False)
         return rc, rm, data
+
 
     def read_record(self, values):
 
@@ -176,7 +153,8 @@ class Database(object):
             if rc != 0:
                 rm = "Error - cannot read from database [%s]." % self.db_name
         else:
-            pass
+            rm = "Not enough values to read record from database"
+            rc = ERROR_SQL_QUERY
 
         return rc, rm, data
 
@@ -211,54 +189,6 @@ class Database(object):
         return rc, rm
 
 
-class MainDb(Database):
-
-    _table_struct = {
-        "name"  :   ("main_table",),
-        "pk"    :   ("field_name", "id"),
-        "items" :   (
-                    ( "field_name",     "TEXT",     "NOT NULL", "DEFAULT \"\"" ),
-                    ( "description",    "TEXT",     "NOT NULL", "DEFAULT \"\"" ),
-                    ( "id",             "INTEGER",  "NOT NULL", "DEFAULT 0" )
-        )
-    }
-
-
-    def __init__(self, db_name=None, db_path=None, db_table_struct=_table_struct):
-        super(MainDb,self).__init__(db_name, db_path, db_table_struct)
-
-    '''
-    def __init__(self, db_name=None, db_path=None, db_table_struct=_table_struct):
-        super(MainDb,self).__init__(db_name, db_table_struct)
-    '''
-
-
-
 
 if __name__ == "__main__":
-
-    m = MainDb(db_path="db.db")
-    m.create_table()
-    m.add_record(("domino", "haha", 9))
-    m.add_record(("domino", "haha", 9))
-
-    c = { 'field_name' : "domino"}
-    v = { 'field_name' : "changed", "description" : "something new", "id" : 1 }
-
-    m.update_record(v, c)
-
-    #m.check_structure()
-    '''
-    .add_record(("domino", "haha", 9))
-    #print m.read_record(("domino", 9))[1]
-    #m.delete_record(("domino", 9))
-    #print m.read_record(("domino", 9))[1]
-    #m.add_record(("domino", "haha", 9))
-    m.add_record(("stefano", "haha", 9))
-    m.add_record(("stefano", "haha", 11))
-    print m.read_all()[1]
-    '''
-
-
-
-
+    pass
