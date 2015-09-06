@@ -3,8 +3,8 @@ import os, sys
 import sqlite3
 
 NOERROR = 0
-ERROR_TABLE_EXIST = 20
-ERROR_TABLE_CORRUPT = 21
+ERROR_TABLE_NOT_EXISTS = 20
+ERROR_TABLE_DIFF = 21
 
 class Database(object):
 
@@ -30,57 +30,54 @@ class Database(object):
             self.row = len(self.items)
             self.column = len(db_table_struct)
 
-            #print "".join()
-
             sub_sql_query = ", ".join([ " ".join(x) for x in MainDb._table_struct["items"]])
             sql_query_pk = "PRIMARY KEY ( %s )" % ", ".join(MainDb._table_struct["pk"])
 
             self.sql_query_create = "CREATE TABLE %s ( %s, %s );" % ( self.db_table_name, sub_sql_query, sql_query_pk)
 
 
+    def check_structure(self):
 
-    def Check_Db_Structure(self):
+        rc = 0; rm = ""
 
         sql_get_structure = "select sql from sqlite_master where type = 'table' " + \
                             "and name = \'%s\';" % ( self.db_table_name )
-        (rc, data) = self.Execute(sql_get_structure)
+        rc, rm, data = self.execute(sql_get_structure)
 
         db_structure =  str(data[0][0] + ";")
         if db_structure == self.sql_query_create:
-            print "The table was created"
-
+            rc = NOERROR
         else:
+            rc = ERROR_TABLE_DIFF
+            rm = "Table definition differs - structure [%s]" % sql_get_structure
 
-            print db_structure
-            print self.sql_query_create
-            print "inne bazy"
-
-        #print sql_get_structure
-        #print self.sql_query_create
-
-    def CreateTable(self):
-
-        self.Execute(self.sql_query_create,values=())
+        return rc, rm
 
 
-    def ParseError(self, err_msg):
 
+    def create_table(self):
+
+        rc, rm, data = self.execute(self.sql_query_create,values=())
+        return rc, rm, data
+
+
+    def parse_error(self, error_code, error_msg):
+
+        rc = 0; rm = ""
         err_msg_table_exist = "table %s already exists" % self.db_table_name
 
-        if err_msg == err_msg_table_exist:
-            print "juz jest"
-            self.Check_Db_Structure()
+        if error_msg == err_msg_table_exist:
+            rc, rm = self.check_structure()
         else:
-            print "[%s]" %err_msg
-            #print str_2_compare
-            print "dasda"
-            pass
+            rc = error_code
+            rm = error_msg
+
+        return rc, rm
 
 
-    def Execute(self, sql_query, values=(), commit=False):
+    def execute(self, sql_query, values=(), commit=False):
 
-        rc = 0
-        data = ()
+        rc = 0; rm = ""; data = ()
         db_connection = None
 
         if os.path.exists(self.db_path):
@@ -95,31 +92,27 @@ class Database(object):
                     db_connection.commit()
                 else:
                     data = db_cursor.fetchall()
-                    print "DATA: %s" % data
 
                 if len(data) == 0:
                     data = ()
 
-                rc = 0
-
             except sqlite3.Error as e:
 
                 err_msg = str(e)
-                self.ParseError(err_msg)
-                rc = -1
+                rc, rm = self.parse_error(err_msg)
 
             finally:
                 if db_connection:
                     db_connection.close()
 
         else:
-            print "Database %s does not exist." % self.db_path
-            rc = -1
+            rm =  "Database %s does not exist." % self.db_path
+            rc = ERROR_TABLE_NOT_EXISTS
 
-        return (rc, data)
+        return rc, rm, data
 
 
-    def AddRecord(self, key_values):
+    def add_record(self, key_values):
 
         sql_query_insert = "Insert INTO %s VALUES (" % self.db_table_name
         sql_sub_query = ""
@@ -133,11 +126,11 @@ class Database(object):
 
             sql_query_insert += sql_sub_query + " );"
 
-            self.Execute(sql_query_insert, key_values, True)
+            self.execute(sql_query_insert, key_values, True)
         else:
             print "Not enough values"
 
-    def DeleteRecord(self, values):
+    def delete_record(self, values):
 
         sql_query_delete = "DELETE FROM %s WHERE " % self.db_table_name
 
@@ -150,21 +143,20 @@ class Database(object):
                     sql_query_delete += " and %s=?" % self.keys[index]
             sql_query_delete += ";"
 
-            self.Execute(sql_query_delete, values, commit=True)
+            self.execute(sql_query_delete, values, commit=True)
 
         else:
             print "Type more details."
 
-    def ReadAll(self):
+    def read_all(self):
 
         sql_query_select = "SELECT * FROM %s;" % self.db_table_name
-        (rc, data) = self.Execute(sql_query_select, commit=False)
+        rc, rm, data = self.execute(sql_query_select, commit=False)
+        return rc, rm, data
 
-        return (rc, data)
+    def read_record(self, values):
 
-    def ReadRecord(self, values):
-
-        rc = 0
+        rc = 0; rm =""
         data = ()
         sql_query_select = "SELECT * FROM %s " % self.db_table_name
 
@@ -179,16 +171,16 @@ class Database(object):
 
             sql_query_select += ";"
 
-            (rc, data) = self.Execute(sql_query_select, values)
+            rc, rm, data = self.execute(sql_query_select, values)
 
             if rc != 0:
-                print "Error, cannot read fro database."
+                rm = "Error - cannot read from database [%s]." % self.db_name
         else:
-            print "Type more details."
+            pass
 
-        return (rc, data)
+        return rc, rm, data
 
-    def UpdateRecord(self, values, conditions):
+    def update_record(self, values, conditions):
 
         rc = 0
         data = ()
@@ -205,7 +197,7 @@ class Database(object):
 
         sql_condition = " WHERE "
         for index, key in enumerate(conditions):
-            print key
+
             if index == 0:
                 sql_condition += "%s=?" % key
             else:
@@ -215,7 +207,8 @@ class Database(object):
 
         sql_query_update += sql_condition
         val_tup = tuple(val)
-        self.Execute(sql_query_update, val_tup, commit=True)
+        rc, rm, data = self.execute(sql_query_update, val_tup, commit=True)
+        return rc, rm
 
 
 class MainDb(Database):
@@ -229,7 +222,6 @@ class MainDb(Database):
                     ( "id",             "INTEGER",  "NOT NULL", "DEFAULT 0" )
         )
     }
-
 
 
     def __init__(self, db_name=None, db_path=None, db_table_struct=_table_struct):
@@ -246,25 +238,25 @@ class MainDb(Database):
 if __name__ == "__main__":
 
     m = MainDb(db_path="db.db")
-    m.CreateTable()
-    m.AddRecord(("domino", "haha", 9))
-    m.AddRecord(("domino", "haha", 9))
+    m.create_table()
+    m.add_record(("domino", "haha", 9))
+    m.add_record(("domino", "haha", 9))
 
     c = { 'field_name' : "domino"}
     v = { 'field_name' : "changed", "description" : "something new", "id" : 1 }
 
-    m.UpdateRecord(v, c)
+    m.update_record(v, c)
 
-    #m.Check_Db_Structure()
+    #m.check_structure()
     '''
-    .AddRecord(("domino", "haha", 9))
-    #print m.ReadRecord(("domino", 9))[1]
-    #m.DeleteRecord(("domino", 9))
-    #print m.ReadRecord(("domino", 9))[1]
-    #m.AddRecord(("domino", "haha", 9))
-    m.AddRecord(("stefano", "haha", 9))
-    m.AddRecord(("stefano", "haha", 11))
-    print m.ReadAll()[1]
+    .add_record(("domino", "haha", 9))
+    #print m.read_record(("domino", 9))[1]
+    #m.delete_record(("domino", 9))
+    #print m.read_record(("domino", 9))[1]
+    #m.add_record(("domino", "haha", 9))
+    m.add_record(("stefano", "haha", 9))
+    m.add_record(("stefano", "haha", 11))
+    print m.read_all()[1]
     '''
 
 
