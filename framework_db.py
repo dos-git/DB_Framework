@@ -5,16 +5,17 @@ import sqlite3
 NOERROR = 0
 ERROR_TABLE_NOT_EXISTS = 20
 ERROR_TABLE_DIFF = 21
-ERROR_SQL_QUERY = 22
+ERROR_SQL_QUERY_VALUES = 22
+ERROR_ITEM_NOT_UNIQUE = 25
 
 class Database(object):
 
-    def __init__(self, db_name=None, db_path=None, db_table_struct=None):
+    def __init__(self, db_name="", db_path="", db_table_struct=None):
 
         self.db_name = db_name
         self.db_path = os.getcwd() + os.sep + db_path
 
-        if db_table_struct == None:
+        if db_table_struct == None :
 
             self.db_table_name = ""
             self.column = 0
@@ -35,7 +36,7 @@ class Database(object):
             sql_query_pk = "PRIMARY KEY ( %s )" % ", ".join(db_table_struct["pk"])
 
             self.sql_query_create = "CREATE TABLE %s ( %s, %s );" % ( self.db_table_name, sub_sql_query, sql_query_pk)
-
+            #CREATE TABLE main_table ( field_name TEXT NOT NULL DEFAULT "", id INTEGER NOT NULL DEFAULT 0, PRIMARY KEY ( field_name, id ) );
 
     def check_structure(self):
 
@@ -79,14 +80,16 @@ class Database(object):
     def execute(self, sql_query, values=(), commit=False):
         return 0, "", ()
 
-    def add_record(self, key_values):
+    def add_record(self, record):
 
-        rc = NOERROR; rm = ""
-        sql_query_insert = "Insert INTO %s VALUES (" % self.db_table_name
+        rc = NOERROR
+        rm = ""
+        data = ()
+        sql_query_insert = "INSERT INTO %s VALUES (" % self.db_table_name
         sql_sub_query = ""
 
-        if len(key_values) == self.column:
-            for index, element in enumerate(key_values):
+        if len(record) == self.column:
+            for index, element in enumerate(record):
 
                 sql_sub_query += " ?"
                 if index < self.column - 1:
@@ -94,32 +97,32 @@ class Database(object):
 
             sql_query_insert += sql_sub_query + " );"
 
-            self.execute(sql_query_insert, key_values, True)
+            rc, rm, data = self.execute(sql_query_insert, record, True)
         else:
-            rm = "Not enough values to add record in database"
-            rc = ERROR_SQL_QUERY
+            rm = "Wrong amount of values"
+            rc = ERROR_SQL_QUERY_VALUES
 
         return rc, rm
 
-    def delete_record(self, values):
+    def delete_record(self, record):
 
         rc = NOERROR; rm = ""
         sql_query_delete = "DELETE FROM %s WHERE " % self.db_table_name
 
-        if len(values) == len(self.keys):
+        if len(record) == len(self.keys):
 
-            for index, element in enumerate(values):
+            for index, element in enumerate(record):
                 if index == 0:
                     sql_query_delete += "%s=?" % self.keys[index]
                 else:
                     sql_query_delete += " and %s=?" % self.keys[index]
             sql_query_delete += ";"
 
-            self.execute(sql_query_delete, values, commit=True)
+            self.execute(sql_query_delete, record, commit=True)
 
         else:
             rm = "Not enough values to delete record in database"
-            rc = ERROR_SQL_QUERY
+            rc = ERROR_SQL_QUERY_VALUES
 
         return rc, rm
 
@@ -131,63 +134,76 @@ class Database(object):
         return rc, rm, data
 
 
-    def read_record(self, values):
+    def read_record(self, record):
 
         rc = 0; rm =""
         data = ()
-        sql_query_select = "SELECT * FROM %s " % self.db_table_name
+        sql_query_select = "SELECT * FROM %s WHERE " % self.db_table_name
 
-        if len(values) > 0:
+        if len(record) == len(self.keys):
 
-            sql_query_select += "WHERE "
-            for index, element in enumerate(values):
+            for index, element in enumerate(record):
                 if index == 0:
                     sql_query_select += "%s = ?" % self.keys[index]
                 else:
                     sql_query_select += " and %s = ?" % self.keys[index]
 
             sql_query_select += ";"
-
-            rc, rm, data = self.execute(sql_query_select, values)
+            rc, rm, data = self.execute(sql_query_select, record)
 
             if rc != 0:
                 rm = "Error - cannot read from database [%s]." % self.db_name
         else:
-            rm = "Not enough values to read record from database"
-            rc = ERROR_SQL_QUERY
+            rm = "Wrong amount of values to update record from database"
+            rc = ERROR_SQL_QUERY_VALUES
 
         return rc, rm, data
 
-    def update_record(self, values, conditions):
 
-        rc = 0
-        data = ()
-        val = []
+    def update_record_by(self, new_record):
+
+        rc = 0; rm = ""; data = ()
+
         sql_query_update = "UPDATE %s SET " % self.db_table_name
+        pk_indexes = {}
+        pk_val = []; list_pk_name = []
 
-        for index, key in enumerate(values):
+        val_condition = {}
+        if self.column != len(new_record):
+            rm = "Wrong amount of values to update record from database"
+            rc = ERROR_SQL_QUERY_VALUES
+            return rc , rm
+        else:
+            # enumerate over table column name to create an update query
+            for index, item in enumerate(self.items):
+                if index == 0:
+                    sql_query_update += "%s = ?" % item
+                else:
+                    sql_query_update += ", %s = ?" % item
 
-            if index == 0:
-                sql_query_update += "%s=?" % key
-            else:
-                sql_query_update += ", %s=?" % key
-            val.append(values[key])
+                # check if column name is primary key, then get appropriate value from record used for the update
+                if item in self.keys:
+                    val_condition[item] = new_record[index]
+                else:
+                    continue
 
+        # convert tuple to list
+        val_new_record = list(new_record)
         sql_condition = " WHERE "
-        for index, key in enumerate(conditions):
 
+        for index, key in enumerate(val_condition.keys()):
             if index == 0:
-                sql_condition += "%s=?" % key
+                sql_condition += "%s = ?" % key
             else:
-                sql_condition += " AND %s=?" % key
-            val.append(conditions[key])
+                sql_condition += " AND %s = ?" % key
+            pk_val.append(val_condition[key])
+
+        val_new_record = val_new_record + pk_val
         sql_condition += ";"
-
         sql_query_update += sql_condition
-        val_tup = tuple(val)
-        rc, rm, data = self.execute(sql_query_update, val_tup, commit=True)
-        return rc, rm
 
+        rc, rm, data = self.execute(sql_query_update, val_new_record, commit=True)
+        return rc, rm
 
 
 if __name__ == "__main__":
