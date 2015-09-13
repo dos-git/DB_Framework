@@ -160,7 +160,7 @@ class Database(object):
         return rc, rm, data
 
 
-    def update_record_by(self, new_record):
+    def update_record(self, new_record):
 
         rc = 0; rm = ""; data = ()
 
